@@ -8,13 +8,13 @@ on:
 env:
   REPO_URL: https://github.com/dailook/immortalwrt-24.10.git
   REPO_BRANCH: openwrt-24.10
-  CONFIG_FILE: OpenWrt-OPKG-TR3000.config
+  CONFIG_FILE: ikuai-q6000.config
   DIY_P1_SH: OpenWrt-part1.sh
   DIY_P2_SH: OpenWrt-part2.sh
   CACHE_TOOLCHAIN: true
   UPLOAD_BIN_DIR: false
   FIRMWARE_RELEASE: true
-  FIRMWARE_TAG: Q6000_immortalwrt_2410
+  FIRMWARE_TAG: ikuai_q6000_immortalwrt_2410
   TZ: Asia/Shanghai
 
 jobs:
