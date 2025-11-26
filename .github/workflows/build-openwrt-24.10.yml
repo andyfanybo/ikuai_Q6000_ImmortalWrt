@@ -2,8 +2,8 @@ name: build-openwrt
 
 on:
   workflow_dispatch:
-  #schedule:
-  #  - cron: 0 19 * * *
+  schedule:
+    - cron: "0 0 1 * *"
 
 env:
   REPO_URL: https://github.com/dailook/immortalwrt-24.10.git
