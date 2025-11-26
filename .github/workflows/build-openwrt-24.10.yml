@@ -1,4 +1,4 @@
-name: CUDY_TR3000_V1_114M_OP_2410
+name: build-openwrt
 
 on:
   workflow_dispatch:
