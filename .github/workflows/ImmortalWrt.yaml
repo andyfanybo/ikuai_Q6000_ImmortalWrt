@@ -154,6 +154,10 @@ jobs:
         cd $OPENWRT_PATH
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
+    - name: SSH Debug
+      uses: mxschmitt/action-tmate@v3
+      if: failure()
+
     - name: Download DL Package
       run: |
         cd $OPENWRT_PATH
