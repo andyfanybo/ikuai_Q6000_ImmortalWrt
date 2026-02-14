@@ -23,6 +23,7 @@ env:
   FIRMWARE_RELEASE: true
   FIRMWARE_TAG: BE12-Pro-immortalwrt
   TZ: Asia/Shanghai
+  ENABLE_CCACHE: true
 
 jobs:
   Build:
@@ -85,9 +86,9 @@ jobs:
 
     # 步骤 3: 扩展磁盘空间
     - name: Combine Disks
-      uses: easimon/maximize-build-space@master
+      uses: easimon/maximize-build-space@v10
       with:
-        swap-size-mb: 1024
+        swap-size-mb: 2048
         temp-reserve-mb: 100
         root-reserve-mb: 1024
 
@@ -137,14 +138,40 @@ jobs:
         DEVICE_SUBTARGET=$(grep -m1 'CONFIG_TARGET_SUBTARGET' .config | cut -d'"' -f2)
         echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> "$GITHUB_ENV"
 
-    # 步骤 7: 缓存编译工具链
+    # 步骤 6.1: 生成缓存 Key（基于配置）
+    - name: Generate Cache Key
+      id: cachekey
+      run: |
+        cd "$OPENWRT_PATH"
+        make defconfig
+        echo "CONFIG_HASH=$(sha1sum .config | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+    # 步骤 7: Toolchain 缓存（更稳定）
     - name: Cache Toolchain
-      if: env.CACHE_TOOLCHAIN == 'true'
-      uses: HiGarfield/cachewrtbuild@main
+      uses: actions/cache@v4
       with:
-        ccache: false
-        mixkey: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
-        prefix: ${{ env.OPENWRT_PATH }}
+        path: |
+          ${{ env.OPENWRT_PATH }}/staging_dir/toolchain-*
+          ${{ env.OPENWRT_PATH }}/staging_dir/host*
+        key: toolchain-${{ env.CONFIG_HASH }}
+
+    # 步骤 7.1: DL 源码缓存
+    - name: Cache DL
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.OPENWRT_PATH }}/dl
+        key: dl-${{ env.CONFIG_HASH }}
+        restore-keys: |
+          dl-
+          
+    # 步骤 7.2: ccache 缓存
+    - name: Cache ccache
+      if: env.ENABLE_CCACHE == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ccache-${{ github.ref }}
+        restore-keys: ccache-  
 
     # 步骤 8: 加载自定义 feeds
     - name: Load Custom Feeds
@@ -197,6 +224,12 @@ jobs:
       id: compile
       run: |
         cd "$OPENWRT_PATH"
+        if [ "$ENABLE_CCACHE" = "true" ]; then
+          export CCACHE_DIR=~/.ccache
+          export CCACHE_MAXSIZE=2G
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+        fi
         mkdir -p files/etc/uci-defaults
         cp "$GITHUB_WORKSPACE/scripts/init-settings.sh" files/etc/uci-defaults/99-init-settings
         
