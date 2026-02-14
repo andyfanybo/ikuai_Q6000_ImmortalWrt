@@ -223,34 +223,53 @@ jobs:
     - name: Organize Files
       if: steps.compile.outputs.status == 'success'
       run: |
-        cd "$OPENWRT_PATH/bin/targets/*/*" || exit 1
+        echo "========== 调试信息 =========="
+        echo "当前工作目录: $PWD"
+        echo "OPENWRT_PATH: $OPENWRT_PATH"
         
-        echo "SHA256 校验和："
-        cat sha256sums
-        
-        # 备份配置
-        cp "$OPENWRT_PATH/.config" build.config
-        
-        # 整理包文件
-        mkdir -p packages 2>/dev/null || true
-        find "$OPENWRT_PATH/bin/packages" -name "*.ipk" -exec mv {} packages/ \; 2>/dev/null || true
-        
-        # 压缩包文件
-        if [ -d "packages" ] && [ "$(ls -A packages)" ]; then
-          tar -zcf Packages.tar.gz packages
-          rm -rf packages
+        # 列出编译输出目录结构
+        echo "bin 目录结构:"
+        if [ -d "$OPENWRT_PATH/bin" ]; then
+          ls -lR "$OPENWRT_PATH/bin/" | head -50
+        else
+          echo "ERROR: $OPENWRT_PATH/bin 目录不存在！"
+          exit 1
         fi
         
-        # 清理不需要的文件
-        rm -f feeds.buildinfo version.buildinfo 2>/dev/null || true
+        echo "========== 寻找固件文件 =========="
+        # 查找所有 .bin 或 .tar.gz 文件
+        FIRMWARE_FILES=$(find "$OPENWRT_PATH/bin" -type f \( -name "*.bin" -o -name "*.tar.gz" -o -name "*.squashfs" \) 2>/dev/null)
+        
+        if [ -z "$FIRMWARE_FILES" ]; then
+          echo "ERROR: 没有找到任何固件文件！"
+          echo "编译可能失败了。请检查上一步的编译日志。"
+          exit 1
+        fi
+        
+        echo "找到的固件文件:"
+        echo "$FIRMWARE_FILES"
+        
+        echo "========== 整理文件 =========="
+        # 创建输出目录
+        mkdir -p "$GITHUB_WORKSPACE/firmware-output"
+        
+        # 复制所有固件文件到输出目录
+        find "$OPENWRT_PATH/bin" -type f \( -name "*.bin" -o -name "*.tar.gz" -o -name "*.squashfs" -o -name "*.imagebuilder*" -o -name "*.manifest" -o -name "sha256sums" \) -exec cp {} "$GITHUB_WORKSPACE/firmware-output/" \; 2>/dev/null || true
+        
+        # 复制配置文件
+        [ -f "$OPENWRT_PATH/.config" ] && cp "$OPENWRT_PATH/.config" "$GITHUB_WORKSPACE/firmware-output/build.config"
+        
+        echo "输出目录内容:"
+        ls -lh "$GITHUB_WORKSPACE/firmware-output/"
+        
+        # 设置固件路径
+        echo "FIRMWARE_PATH=$GITHUB_WORKSPACE/firmware-output" >> "$GITHUB_ENV"
         
         # 提取内核版本
-        if [ -f "*.manifest" ]; then
-          KERNEL=$(grep '^kernel' *.manifest 2>/dev/null | head -1 | cut -d- -f2 | xargs || echo "unknown")
+        if [ -f "$GITHUB_WORKSPACE/firmware-output"/*.manifest ]; then
+          KERNEL=$(grep '^kernel' "$GITHUB_WORKSPACE/firmware-output"/*.manifest 2>/dev/null | head -1 | cut -d- -f2 | xargs || echo "unknown")
           echo "KERNEL=$KERNEL" >> "$GITHUB_ENV"
         fi
-        
-        echo "FIRMWARE_PATH=$PWD" >> "$GITHUB_ENV"
 
     # 步骤 16: 上传固件到制品库（可选）
     - name: Upload Firmware To Artifact
