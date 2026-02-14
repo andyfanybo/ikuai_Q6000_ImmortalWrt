@@ -201,9 +201,13 @@ jobs:
         cp "$GITHUB_WORKSPACE/scripts/init-settings.sh" files/etc/uci-defaults/99-init-settings
         
         echo "使用 $(nproc) 线程编译"
-        
+        echo "编译前的目录结构:"
+        ls -la bin/ 2>/dev/null || echo "bin/ 目录不存在"
         # 多次尝试编译，逐步降低并行度
         make -j$(nproc) || make -j$(( $(nproc) / 2 )) || make -j1 || make -j1 V=s
+
+        echo "编译后的目录结构:"
+        ls -la bin/ 2>/dev/null || echo "bin/ 目录仍不存在"
         
         # 标记编译成功
         echo "status=success" >> "$GITHUB_OUTPUT"
