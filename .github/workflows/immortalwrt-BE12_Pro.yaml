@@ -21,7 +21,7 @@ env:
   CACHE_TOOLCHAIN: true
   UPLOAD_BIN_DIR: false
   FIRMWARE_RELEASE: true
-  FIRMWARE_TAG: BE12 Pro immortalwrt
+  FIRMWARE_TAG: BE12-Pro-immortalwrt
   TZ: Asia/Shanghai
 
 jobs:
