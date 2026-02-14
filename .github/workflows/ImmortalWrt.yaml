@@ -1,87 +1,54 @@
-name: build-immortalwrt
+name: build-ImmortalWrt
 
 on:
   workflow_dispatch:
-    inputs:
-      build_option:
-        description: 'Build Option'
-        required: false
-        default: 'release'
 
 env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: master
+  REPO_URL: https://github.com/dailook/immortalwrt-24.10.git
+  REPO_BRANCH: openwrt-24.10
   CONFIG_FILE: ikuai-q6000.config
   DIY_P1_SH: OpenWrt-part1.sh
   DIY_P2_SH: OpenWrt-part2.sh
   CACHE_TOOLCHAIN: true
   UPLOAD_BIN_DIR: false
   FIRMWARE_RELEASE: true
-  FIRMWARE_TAG: BE12 Pro
+  FIRMWARE_TAG: ikuai_q6000_immortalwrt_2410
   TZ: Asia/Shanghai
 
 jobs:
   Build:
     runs-on: ubuntu-22.04
-    
-    # 添加权限配置
-    permissions:
-      contents: write
-      packages: write
 
     steps:
     - name: Check Server Performance
       run: |
-        echo "⚠️  服务器性能检查"
-        echo "已分配的服务器性能有限，若选择的插件过多，务必注意CPU性能！"
-        echo "已知CPU型号(降序): 7763，8370C，8272CL，8171M，E5-2673"
+        echo "警告⚠"
+        echo "分配的服务器性能有限，若选择的插件过多，务必注意CPU性能！"
+        echo -e "已知CPU型号(降序): 7763，8370C，8272CL，8171M，E5-2673\n"
         echo "--------------------------CPU信息--------------------------"
         echo "CPU物理数量: $(cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l)"
         echo "CPU核心数量: $(nproc)"
-        echo "CPU型号信息: $(cat /proc/cpuinfo | grep -m1 name | awk -F: '{print $2}')"
+        echo -e "CPU型号信息:$(cat /proc/cpuinfo | grep -m1 name | awk -F: '{print $2}')\n"
         echo "--------------------------内存信息--------------------------"
-        sudo lshw -short -C memory | grep GiB || echo "内存信息读取失败"
+        echo "已安装内存详细信息:"
+        echo -e "$(sudo lshw -short -C memory | grep GiB)\n"
         echo "--------------------------硬盘信息--------------------------"
-        echo "硬盘数量: $(ls /dev/sd* 2>/dev/null | grep -v '[1-9]' | wc -l)"
-        df -hT
+        echo "硬盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
 
     - name: Initialization Environment
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 清理Docker镜像和系统文件
-        docker rmi $(docker images -q) 2>/dev/null || true
-        sudo rm -rf \
-          /usr/share/dotnet \
-          /etc/apt/sources.list.d \
-          /usr/local/lib/android \
-          $AGENT_TOOLSDIRECTORY
-        
-        # 卸载不必要的包
-        sudo -E apt-get -y purge \
-          azure-cli ghc* zulu* llvm* firefox google* \
-          dotnet* powershell openjdk* mongodb* moby* 2>/dev/null || true
-        
-        # 更新和安装依赖
+        docker rmi $(docker images -q)
+        sudo rm -rf /usr/share/dotnet /etc/apt/sources.list.d /usr/local/lib/android $AGENT_TOOLSDIRECTORY
+        sudo -E apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
         sudo -E apt-get -y update
-        sudo -E apt-get -y install \
-          asciidoc bash bc bzip2 ccache curl device-tree-compiler \
-          ecj fastjar flex gawk gettext ghc git gperf grep groff \
-          gzip help2man intltool jq libelf-dev libfuse-dev libglib2.0-dev \
-          libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev \
-          libncursesw5-dev libpython3-dev libreadline-dev libssl-dev \
-          libtool lsb-release make meson nano ninja-build node-uglify \
-          npm p7zip p7zip-full patch perl-modules pkgconf python3 \
-          python3-dev python3-distutils python3-pip python3-ply \
-          qemu-utils rsync scons squashfs-tools subversion swig \
-          tar time uglifyjs unzip upx wget xmlto xxd zlib1g-dev
-        
-        # 清理包管理器缓存
+        sudo -E apt-get -y install $(curl -fsSL is.gd/depends_ubuntu_2204)
+        sudo -E apt-get -y install  ccache  curl git libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool p7zip p7zip-full unzip vim wget jq libc6-dev libffi-dev libpcre3-dev libsqlite3-dev  zip gzip
+
         sudo -E systemctl daemon-reload
         sudo -E apt-get -y autoremove --purge
         sudo -E apt-get -y clean
-        
-        # 设置时区
         sudo timedatectl set-timezone "$TZ"
 
     - name: Combine Disks
@@ -91,37 +58,33 @@ jobs:
         temp-reserve-mb: 100
         root-reserve-mb: 1024
 
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+    - name: Checkout
+      uses: actions/checkout@main
 
     - name: Clone Source Code
       run: |
-        echo "克隆源代码..."
         df -hT $GITHUB_WORKSPACE
-        git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
-        
-        # 提取Git信息
-        echo "COMMIT_AUTHOR=$(git show -s --date=short --format='作者: %an')" >> $GITHUB_ENV
-        echo "COMMIT_DATE=$(git show -s --date=short --format='时间: %ci')" >> $GITHUB_ENV
-        echo "COMMIT_MESSAGE=$(git show -s --date=short --format='内容: %s')" >> $GITHUB_ENV
-        echo "COMMIT_HASH=$(git show -s --date=short --format='hash: %H')" >> $GITHUB_ENV
+        COMMIT_AUTHOR=$(git show -s --date=short --format="作者: %an")
+        echo "COMMIT_AUTHOR=$COMMIT_AUTHOR" >> $GITHUB_ENV
+        COMMIT_DATE=$(git show -s --date=short --format="时间: %ci")
+        echo "COMMIT_DATE=$COMMIT_DATE" >> $GITHUB_ENV
+        COMMIT_MESSAGE=$(git show -s --date=short --format="内容: %s")
+        echo "COMMIT_MESSAGE=$COMMIT_MESSAGE" >> $GITHUB_ENV
+        COMMIT_HASH=$(git show -s --date=short --format="hash: %H")
+        echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
 
-    - name: Generate Build Variables
+    - name: Generate Variables
       run: |
         cp $CONFIG_FILE $OPENWRT_PATH/.config
         cd $OPENWRT_PATH
         make defconfig > /dev/null 2>&1
-        
         SOURCE_REPO="$(echo $REPO_URL | awk -F '/' '{print $(NF)}')"
         echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
-        
         DEVICE_TARGET=$(cat .config | grep CONFIG_TARGET_BOARD | awk -F '"' '{print $2}')
         echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
-        
         DEVICE_SUBTARGET=$(cat .config | grep CONFIG_TARGET_SUBTARGET | awk -F '"' '{print $2}')
         echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
 
@@ -133,12 +96,12 @@ jobs:
         mixkey: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
         prefix: ${{ env.OPENWRT_PATH }}
 
-    - name: Load Custom Feeds
+    - name:  Load custom feeds
       run: |
-        chmod +x $GITHUB_WORKSPACE/$DIY_P1_SH
+        chmod +x $DIY_P1_SH
         cd $OPENWRT_PATH
         $GITHUB_WORKSPACE/$DIY_P1_SH
-
+      
     - name: Install Feeds
       run: |
         cd $OPENWRT_PATH
@@ -147,11 +110,12 @@ jobs:
 
     - name: Load Custom Configuration
       run: |
-        [ -e $GITHUB_WORKSPACE/files ] && mv $GITHUB_WORKSPACE/files $OPENWRT_PATH/files
-        [ -e $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp $GITHUB_WORKSPACE/$CONFIG_FILE $OPENWRT_PATH/.config
+        [ -e files ] && mv files $OPENWRT_PATH/files
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE $OPENWRT_PATH/.config
         chmod +x $GITHUB_WORKSPACE/scripts/*.sh
-        chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
+        chmod +x $DIY_P2_SH
         cd $OPENWRT_PATH
+        echo -e "$GITHUB_WORKSPACE/$DIY_P2_SH"
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
     - name: SSH Debug
@@ -163,7 +127,7 @@ jobs:
         cd $OPENWRT_PATH
         make defconfig
         make download -j$(nproc)
-        # 清理无效的下载文件
+        find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
     - name: Compile Firmware
@@ -172,44 +136,41 @@ jobs:
         cd $OPENWRT_PATH
         mkdir -p files/etc/uci-defaults
         cp $GITHUB_WORKSPACE/scripts/init-settings.sh files/etc/uci-defaults/99-init-settings
-        
-        echo "使用 $(nproc) 线程编译"
+        echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 || make -j1 V=s
-        
         echo "status=success" >> $GITHUB_OUTPUT
         echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
         echo "FILE_DATE=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
 
     - name: Check Space Usage
-      if: always()
+      if: (!cancelled())
       run: df -hT
+
+    - name: Upload Bin Directory
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      uses: actions/upload-artifact@main
+      with:
+        name: ${{ env.SOURCE_REPO }}-bin-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.FILE_DATE }}
+        path: ${{ env.OPENWRT_PATH }}/bin
 
     - name: Organize Files
       if: steps.compile.outputs.status == 'success'
       run: |
         cd $OPENWRT_PATH/bin/targets/*/*
         cat sha256sums
-        
         cp $OPENWRT_PATH/.config build.config
-        
-        # 移动ipk文件
-        [ -d packages ] && rm -rf packages
-        mkdir -p packages
-        find $OPENWRT_PATH/bin/packages -name "*.ipk" -exec mv {} packages/ \;
-        
+        mv -f $OPENWRT_PATH/bin/packages/*/*/*.ipk packages
         tar -zcf Packages.tar.gz packages
         rm -rf packages feeds.buildinfo version.buildinfo
-        
         echo "KERNEL=$(cat *.manifest | grep ^kernel | cut -d- -f2 | tr -d ' ')" >> $GITHUB_ENV
         echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
 
     - name: Upload Firmware To Artifact
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@main
       with:
         name: ${{ env.SOURCE_REPO }}-firmware-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE_PATH }}
-        retention-days: 7
 
     - name: Upload Firmware To Release
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE == 'true'
@@ -221,18 +182,17 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: ${{ env.FIRMWARE_PATH }}/*
         body: |
-          **OpenWrt 固件 - ${{ env.FIRMWARE_TAG }}**
-          
+          **This is OpenWrt Firmware for ${{ env.FIRMWARE_TAG }}**
           ### 📒 固件信息
-          - 💻 平台架构: `${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}`
-          - ⚽ 固件源码: [${{ env.REPO_URL }}](${{ env.REPO_URL }})
-          - 💝 源码分支: `${{ env.REPO_BRANCH }}`
-          - 🚀 内核版本: `${{ env.KERNEL }}`
-          - 🌐 默认地址: `192.168.1.1`
+          - 💻 平台架构: ${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
+          - ⚽ 固件源码: ${{ env.REPO_URL }}
+          - 💝 源码分支: ${{ env.REPO_BRANCH }}
+          - 🚀 内核版本: ${{ env.KERNEL }}
+          - 🌐 默认地址: 192.168.1.1
           - 🔑 默认密码: 无
-          
-          ### 🧊 源码更新记录
-          ${{ env.COMMIT_AUTHOR }}  
-          ${{ env.COMMIT_DATE }}  
-          ${{ env.COMMIT_MESSAGE }}  
-          `${{ env.COMMIT_HASH }}`
+          ### 🧊 固件版本
+          - 固件编译前最后一次➦[主源码](${{ env.REPO_URL }})更新记录
+          - ${{ env.COMMIT_AUTHOR }}
+          - ${{ env.COMMIT_DATE }}
+          - ${{ env.COMMIT_MESSAGE }}
+          - ${{ env.COMMIT_HASH }}
