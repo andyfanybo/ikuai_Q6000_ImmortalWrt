@@ -2,8 +2,6 @@ name: build-openwrt
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 0 1 * *"
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
@@ -119,6 +117,10 @@ jobs:
         cd $OPENWRT_PATH
         echo -e "$GITHUB_WORKSPACE/$DIY_P2_SH"
         $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: SSH Debug
+      uses: mxschmitt/action-tmate@v3
+      if: failure()
 
     - name: Download DL Package
       run: |
