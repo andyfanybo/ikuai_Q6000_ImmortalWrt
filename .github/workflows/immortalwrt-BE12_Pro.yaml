@@ -1,4 +1,4 @@
-name: build-ImmortalWrt
+name: immortalwrt-BE12_Pro
 
 on:
   workflow_dispatch:
