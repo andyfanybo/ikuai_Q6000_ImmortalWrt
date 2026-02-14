@@ -2,6 +2,15 @@ name: build-ImmortalWrt
 
 on:
   workflow_dispatch:
+    inputs:
+      enable_ssh_debug:
+        description: '启用 SSH 调试模式'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
@@ -18,39 +27,63 @@ env:
 jobs:
   Build:
     runs-on: ubuntu-22.04
-
+    # 添加权限声明
+    permissions:
+      contents: write
+      packages: write
+    
     steps:
+    # 步骤 1: 检查服务器性能
     - name: Check Server Performance
       run: |
-        echo "警告⚠"
+        echo "警告⚠ 服务器性能检查"
         echo "分配的服务器性能有限，若选择的插件过多，务必注意CPU性能！"
-        echo -e "已知CPU型号(降序): 7763，8370C，8272CL，8171M，E5-2673\n"
-        echo "--------------------------CPU信息--------------------------"
-        echo "CPU物理数量: $(cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l)"
+        echo "已知CPU型号(降序): 7763，8370C，8272CL，8171M，E5-2673"
+        echo "----- CPU信息 -----"
+        echo "CPU物理数量: $(cat /proc/cpuinfo | grep 'physical id' | sort -u | wc -l)"
         echo "CPU核心数量: $(nproc)"
-        echo -e "CPU型号信息:$(cat /proc/cpuinfo | grep -m1 name | awk -F: '{print $2}')\n"
-        echo "--------------------------内存信息--------------------------"
-        echo "已安装内存详细信息:"
-        echo -e "$(sudo lshw -short -C memory | grep GiB)\n"
-        echo "--------------------------硬盘信息--------------------------"
-        echo "硬盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
+        echo "CPU型号信息: $(cat /proc/cpuinfo | grep -m1 'model name' | cut -d':' -f2 | xargs)"
+        echo "----- 内存信息 -----"
+        free -h || true
+        echo "----- 硬盘信息 -----"
+        df -hT
 
+    # 步骤 2: 初始化编译环境
     - name: Initialization Environment
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
+        # 清理 Docker 镜像
         docker rmi $(docker images -q) 2>/dev/null || true
-        sudo rm -rf /usr/share/dotnet /etc/apt/sources.list.d /usr/local/lib/android $AGENT_TOOLSDIRECTORY
-        sudo -E apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
+        
+        # 删除不需要的路径
+        sudo rm -rf /usr/share/dotnet /etc/apt/sources.list.d /usr/local/lib/android "$AGENT_TOOLSDIRECTORY" || true
+        
+        # 卸载大型软件包
+        sudo -E apt-get -y purge \
+          azure-cli ghc* zulu* llvm* firefox google* dotnet* \
+          powershell openjdk* mongodb* moby* 2>/dev/null || true
+        
+        # 更新包管理器
         sudo -E apt-get -y update
-        sudo -E apt-get -y install $(curl -fsSL is.gd/depends_ubuntu_2204)
-        sudo -E apt-get -y install  ccache  curl git libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool p7zip p7zip-full unzip vim wget jq libc6-dev libffi-dev libpcre3-dev libsqlite3-dev  zip gzip
-
+        
+        # 安装依赖包
+        sudo -E apt-get -y install \
+          build-essential ccache curl git libelf-dev libfuse-dev libglib2.0-dev \
+          libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev \
+          libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool \
+          p7zip p7zip-full unzip vim wget jq libc6-dev libffi-dev libpcre3-dev \
+          libsqlite3-dev zip gzip
+        
+        # 清理和优化
         sudo -E systemctl daemon-reload
         sudo -E apt-get -y autoremove --purge
         sudo -E apt-get -y clean
+        
+        # 设置时区
         sudo timedatectl set-timezone "$TZ"
 
+    # 步骤 3: 扩展磁盘空间
     - name: Combine Disks
       uses: easimon/maximize-build-space@master
       with:
@@ -58,36 +91,53 @@ jobs:
         temp-reserve-mb: 100
         root-reserve-mb: 1024
 
+    # 步骤 4: 检出代码
     - name: Checkout
-      uses: actions/checkout@main
+      uses: actions/checkout@v4
 
+    # 步骤 5: 克隆源码并提取 Git 信息
     - name: Clone Source Code
       run: |
-        df -hT $GITHUB_WORKSPACE
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        echo "磁盘空间使用情况："
+        df -hT "$GITHUB_WORKSPACE"
+        
+        echo "克隆源码仓库..."
+        git clone "$REPO_URL" -b "$REPO_BRANCH" openwrt
+        
         cd openwrt
-        echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
+        echo "OPENWRT_PATH=$PWD" >> "$GITHUB_ENV"
+        
+        # 提取 Git 信息
         COMMIT_AUTHOR=$(git show -s --date=short --format="作者: %an")
-        echo "COMMIT_AUTHOR=$COMMIT_AUTHOR" >> $GITHUB_ENV
+        echo "COMMIT_AUTHOR=$COMMIT_AUTHOR" >> "$GITHUB_ENV"
+        
         COMMIT_DATE=$(git show -s --date=short --format="时间: %ci")
-        echo "COMMIT_DATE=$COMMIT_DATE" >> $GITHUB_ENV
+        echo "COMMIT_DATE=$COMMIT_DATE" >> "$GITHUB_ENV"
+        
         COMMIT_MESSAGE=$(git show -s --date=short --format="内容: %s")
-        echo "COMMIT_MESSAGE=$COMMIT_MESSAGE" >> $GITHUB_ENV
+        echo "COMMIT_MESSAGE=$COMMIT_MESSAGE" >> "$GITHUB_ENV"
+        
         COMMIT_HASH=$(git show -s --date=short --format="hash: %H")
-        echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+        echo "COMMIT_HASH=$COMMIT_HASH" >> "$GITHUB_ENV"
 
+    # 步骤 6: 生成变量
     - name: Generate Variables
       run: |
-        cp $CONFIG_FILE $OPENWRT_PATH/.config
-        cd $OPENWRT_PATH
+        cp "$CONFIG_FILE" "$OPENWRT_PATH/.config"
+        
+        cd "$OPENWRT_PATH"
         make defconfig > /dev/null 2>&1
-        SOURCE_REPO="$(echo $REPO_URL | awk -F '/' '{print $(NF)}')"
-        echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
-        DEVICE_TARGET=$(cat .config | grep CONFIG_TARGET_BOARD | awk -F '"' '{print $2}')
-        echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
-        DEVICE_SUBTARGET=$(cat .config | grep CONFIG_TARGET_SUBTARGET | awk -F '"' '{print $2}')
-        echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
+        
+        SOURCE_REPO="$(basename "$REPO_URL" .git)"
+        echo "SOURCE_REPO=$SOURCE_REPO" >> "$GITHUB_ENV"
+        
+        DEVICE_TARGET=$(grep -m1 'CONFIG_TARGET_BOARD' .config | cut -d'"' -f2)
+        echo "DEVICE_TARGET=$DEVICE_TARGET" >> "$GITHUB_ENV"
+        
+        DEVICE_SUBTARGET=$(grep -m1 'CONFIG_TARGET_SUBTARGET' .config | cut -d'"' -f2)
+        echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> "$GITHUB_ENV"
 
+    # 步骤 7: 缓存编译工具链
     - name: Cache Toolchain
       if: env.CACHE_TOOLCHAIN == 'true'
       uses: HiGarfield/cachewrtbuild@main
@@ -96,103 +146,162 @@ jobs:
         mixkey: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
         prefix: ${{ env.OPENWRT_PATH }}
 
-    - name:  Load custom feeds
+    # 步骤 8: 加载自定义 feeds
+    - name: Load Custom Feeds
       run: |
-        chmod +x $DIY_P1_SH
-        cd $OPENWRT_PATH
-        $GITHUB_WORKSPACE/$DIY_P1_SH
-      
+        chmod +x "$DIY_P1_SH"
+        cd "$OPENWRT_PATH"
+        "$GITHUB_WORKSPACE/$DIY_P1_SH"
+
+    # 步骤 9: 更新和安装 feeds
     - name: Install Feeds
       run: |
-        cd $OPENWRT_PATH
+        cd "$OPENWRT_PATH"
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
+    # 步骤 10: 加载自定义配置
     - name: Load Custom Configuration
       run: |
-        [ -e files ] && mv files $OPENWRT_PATH/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE $OPENWRT_PATH/.config
-        chmod +x $GITHUB_WORKSPACE/scripts/*.sh
-        chmod +x $DIY_P2_SH
-        cd $OPENWRT_PATH
-        echo -e "$GITHUB_WORKSPACE/$DIY_P2_SH"
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        [ -e files ] && mv files "$OPENWRT_PATH/files"
+        [ -e "$CONFIG_FILE" ] && mv "$CONFIG_FILE" "$OPENWRT_PATH/.config"
+        
+        chmod +x "$GITHUB_WORKSPACE/scripts"/*.sh
+        chmod +x "$DIY_P2_SH"
+        
+        cd "$OPENWRT_PATH"
+        "$GITHUB_WORKSPACE/$DIY_P2_SH"
 
+    # 步骤 11: SSH 调试（可选）
     - name: SSH Debug
       uses: mxschmitt/action-tmate@v3
-      if: failure()
+      if: |
+        failure() || 
+        (github.event_name == 'workflow_dispatch' && 
+         github.event.inputs.enable_ssh_debug == 'true')
+      with:
+        limit-output-lines: 1000
 
+    # 步骤 12: 下载依赖包
     - name: Download DL Package
       run: |
-        cd $OPENWRT_PATH
+        cd "$OPENWRT_PATH"
         make defconfig
         make download -j$(nproc)
-        find dl -size -1024c -exec ls -l {} \;
+        
+        # 移除损坏的包
         find dl -size -1024c -exec rm -f {} \;
 
+    # 步骤 13: 编译固件
     - name: Compile Firmware
       id: compile
       run: |
-        cd $OPENWRT_PATH
+        cd "$OPENWRT_PATH"
         mkdir -p files/etc/uci-defaults
-        cp $GITHUB_WORKSPACE/scripts/init-settings.sh files/etc/uci-defaults/99-init-settings
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-        echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
-        echo "FILE_DATE=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
+        cp "$GITHUB_WORKSPACE/scripts/init-settings.sh" files/etc/uci-defaults/99-init-settings
+        
+        echo "使用 $(nproc) 线程编译"
+        
+        # 多次尝试编译，逐步降低并行度
+        make -j$(nproc) || make -j$(( $(nproc) / 2 )) || make -j1 || make -j1 V=s
+        
+        # 标记编译成功
+        echo "status=success" >> "$GITHUB_OUTPUT"
+        
+        # 记录时间
+        echo "DATE=$(date +'%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
+        echo "FILE_DATE=$(date +'%Y.%m.%d')" >> "$GITHUB_ENV"
 
+    # 步骤 14: 检查空间使用
     - name: Check Space Usage
-      if: (!cancelled())
-      run: df -hT
+      if: always()
+      run: |
+        echo "编译后磁盘空间使用情况："
+        df -hT
 
-    - name: Upload Bin Directory
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
-      uses: actions/upload-artifact@main
-      with:
-        name: ${{ env.SOURCE_REPO }}-bin-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.FILE_DATE }}
-        path: ${{ env.OPENWRT_PATH }}/bin
-
+    # 步骤 15: 整理固件文件
     - name: Organize Files
       if: steps.compile.outputs.status == 'success'
       run: |
-        cd $OPENWRT_PATH/bin/targets/*/*
+        cd "$OPENWRT_PATH/bin/targets/*/*" || exit 1
+        
+        echo "SHA256 校验和："
         cat sha256sums
-        cp $OPENWRT_PATH/.config build.config
-        mv -f $OPENWRT_PATH/bin/packages/*/*/*.ipk packages
-        tar -zcf Packages.tar.gz packages
-        rm -rf packages feeds.buildinfo version.buildinfo
-        echo "KERNEL=$(cat *.manifest | grep ^kernel | cut -d- -f2 | tr -d ' ')" >> $GITHUB_ENV
-        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
+        
+        # 备份配置
+        cp "$OPENWRT_PATH/.config" build.config
+        
+        # 整理包文件
+        mkdir -p packages 2>/dev/null || true
+        find "$OPENWRT_PATH/bin/packages" -name "*.ipk" -exec mv {} packages/ \; 2>/dev/null || true
+        
+        # 压缩包文件
+        if [ -d "packages" ] && [ "$(ls -A packages)" ]; then
+          tar -zcf Packages.tar.gz packages
+          rm -rf packages
+        fi
+        
+        # 清理不需要的文件
+        rm -f feeds.buildinfo version.buildinfo 2>/dev/null || true
+        
+        # 提取内核版本
+        if [ -f "*.manifest" ]; then
+          KERNEL=$(grep '^kernel' *.manifest 2>/dev/null | head -1 | cut -d- -f2 | xargs || echo "unknown")
+          echo "KERNEL=$KERNEL" >> "$GITHUB_ENV"
+        fi
+        
+        echo "FIRMWARE_PATH=$PWD" >> "$GITHUB_ENV"
 
+    # 步骤 16: 上传固件到制品库（可选）
     - name: Upload Firmware To Artifact
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
-      uses: actions/upload-artifact@main
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ env.SOURCE_REPO }}-firmware-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE_PATH }}
+        retention-days: 30
 
+    # 步骤 17: 上传固件到 Release
     - name: Upload Firmware To Release
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE == 'true'
       uses: ncipollo/release-action@v1
       with:
         name: R${{ env.DATE }} for ${{ env.FIRMWARE_TAG }}
         allowUpdates: true
+        makeLatest: true
         tag: ${{ env.FIRMWARE_TAG }}
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: ${{ env.FIRMWARE_PATH }}/*
         body: |
-          **This is OpenWrt Firmware for ${{ env.FIRMWARE_TAG }}**
-          ### 📒 固件信息
-          - 💻 平台架构: ${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
-          - ⚽ 固件源码: ${{ env.REPO_URL }}
-          - 💝 源码分支: ${{ env.REPO_BRANCH }}
-          - 🚀 内核版本: ${{ env.KERNEL }}
-          - 🌐 默认地址: 192.168.1.1
+          # ImmortalWrt 固件发布
+          **设备**: ${{ env.FIRMWARE_TAG }}
+          **编译时间**: ${{ env.DATE }}
+          
+          ## 📒 固件信息
+          - 💻 平台架构: `${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}`
+          - ⚽ 固件源码: [${{ env.REPO_URL }}](${{ env.REPO_URL }})
+          - 💝 源码分支: `${{ env.REPO_BRANCH }}`
+          - 🚀 内核版本: `${{ env.KERNEL }}`
+          - 🌐 默认地址: `192.168.1.1`
           - 🔑 默认密码: 无
-          ### 🧊 固件版本
-          - 固件编译前最后一次➦[主源码](${{ env.REPO_URL }})更新记录
-          - ${{ env.COMMIT_AUTHOR }}
-          - ${{ env.COMMIT_DATE }}
-          - ${{ env.COMMIT_MESSAGE }}
-          - ${{ env.COMMIT_HASH }}
+          
+          ## 🧊 最后一次源码更新记录
+          ```
+          ${{ env.COMMIT_AUTHOR }}
+          ${{ env.COMMIT_DATE }}
+          ${{ env.COMMIT_MESSAGE }}
+          ${{ env.COMMIT_HASH }}
+          ```
+          
+          ## 📝 SHA256 校验
+          
+          请检查下载的固件文件完整性。
+
+    # 步骤 18: 清理工作空间（可选）
+    - name: Clean Up Workspace
+      if: always()
+      run: |
+        # 可选：删除大型临时文件以节省空间
+        cd "$OPENWRT_PATH" 2>/dev/null || true
+        rm -rf .git dl/git-* 2>/dev/null || true
+        du -sh . || true
