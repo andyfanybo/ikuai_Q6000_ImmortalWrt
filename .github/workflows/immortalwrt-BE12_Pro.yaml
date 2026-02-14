@@ -166,12 +166,12 @@ jobs:
           
     # 步骤 7.2: ccache 缓存
     - name: Cache ccache
-      if: env.ENABLE_CCACHE == 'true'
+      if: always() && env.ENABLE_CCACHE == 'true'
       uses: actions/cache@v4
       with:
         path: ~/.ccache
         key: ccache-${{ github.ref }}
-        restore-keys: ccache-  
+        restore-keys: ccache-
 
     # 步骤 8: 加载自定义 feeds
     - name: Load Custom Feeds
@@ -193,7 +193,7 @@ jobs:
         [ -e files ] && mv files "$OPENWRT_PATH/files"
         [ -e "$CONFIG_FILE" ] && mv "$CONFIG_FILE" "$OPENWRT_PATH/.config"
         
-        chmod +x "$GITHUB_WORKSPACE/scripts"/*.sh
+        [ -d "$GITHUB_WORKSPACE/scripts" ] && chmod +x "$GITHUB_WORKSPACE/scripts"/*.sh
         chmod +x "$DIY_P2_SH"
         
         cd "$OPENWRT_PATH"
