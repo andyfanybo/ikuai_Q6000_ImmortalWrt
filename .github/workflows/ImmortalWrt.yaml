@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
 
 env:
-  REPO_URL: https://github.com/dailook/immortalwrt-24.10.git
-  REPO_BRANCH: openwrt-24.10
+  REPO_URL: https://github.com/immortalwrt/immortalwrt
+  REPO_BRANCH: master
   CONFIG_FILE: ikuai-q6000.config
   DIY_P1_SH: OpenWrt-part1.sh
   DIY_P2_SH: OpenWrt-part2.sh
   CACHE_TOOLCHAIN: true
   UPLOAD_BIN_DIR: false
   FIRMWARE_RELEASE: true
-  FIRMWARE_TAG: ikuai_q6000_immortalwrt_2410
+  FIRMWARE_TAG: BE12 Pro immortalwrt
   TZ: Asia/Shanghai
 
 jobs:
