@@ -13,9 +13,9 @@ on:
           - 'true'
 
 env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: master
-  CONFIG_FILE: BE12_Pro.config
+  REPO_URL: https://github.com/chasey-dev/immortalwrt-mt798x-rebase
+  REPO_BRANCH: 25.12-dev-wifi7
+  # CONFIG_FILE: BE12_Pro.config
   DIY_P1_SH: OpenWrt-part1.sh
   DIY_P2_SH: OpenWrt-part2.sh
   CACHE_TOOLCHAIN: true
