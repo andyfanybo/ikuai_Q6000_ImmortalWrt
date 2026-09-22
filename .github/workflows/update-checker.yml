@@ -1,58 +1,53 @@
-#
-# Copyright (c) 2019-2021 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-# File: .github/workflows/update-checker.yml
-# Description: Source code update checker
-#
-
-name: Update Checker
-
-env:
-  REPO_URL: https://github.com/coolsnowwolf/lede
-  REPO_BRANCH: master
+name: Q6000 Source Update Checker
 
 on:
   workflow_dispatch:
-#  schedule:
-#    - cron: 0 */18 * * *
+  schedule:
+    - cron: '17 2 * * *'
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  REPO_URL: https://github.com/dailook/immortalwrt-24.10.git
+  REPO_BRANCH: openwrt-24.10
 
 jobs:
   check:
     runs-on: ubuntu-latest
-
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Get Commit Hash
-      id: getHash
-      run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH .
-        echo "::set-output name=commitHash::$(git rev-parse HEAD)"
+      - name: Get upstream commit
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPSTREAM_SHA=$(git ls-remote "$REPO_URL" "refs/heads/$REPO_BRANCH" | awk '{print $1}')
+          [ -n "$UPSTREAM_SHA" ] || { echo "ERROR: 无法获取上游提交"; exit 1; }
+          echo "sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+          echo "Upstream: $UPSTREAM_SHA"
 
-    - name: Compare Commit Hash
-      id: cacheHash
-      uses: actions/cache@v2
-      with:
-        path: .commitHash
-        key: HEAD-${{ steps.getHash.outputs.commitHash }}
+      - name: Restore last seen commit
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: .upstream-commit
+          key: q6000-upstream-${{ steps.upstream.outputs.sha }}
 
-    - name: Save New Commit Hash
-      if: steps.cacheHash.outputs.cache-hit != 'true'
-      run: |
-        echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
+      - name: Record upstream commit
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: echo "${{ steps.upstream.outputs.sha }}" > .upstream-commit
 
-    - name: Trigger build
-      if: steps.cacheHash.outputs.cache-hit != 'true'
-      uses: peter-evans/repository-dispatch@v1
-      with:
-        token: ${{ secrets.ACTIONS_TRIGGER_PAT }}
-        event-type: Source Code Update
-
-    - name: Delete workflow runs
-      uses: GitRML/delete-workflow-runs@main
-      with:
-        retain_days: 1
-        keep_minimum_runs: 1
+      - name: Trigger Q6000 build
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/dispatches" \
+            -f event_type='source-code-update'
