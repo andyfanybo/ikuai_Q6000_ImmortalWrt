@@ -31,7 +31,6 @@ jobs:
     # 添加权限声明
     permissions:
       contents: write
-      packages: write
     
     steps:
     # 步骤 1: 检查服务器性能
@@ -124,19 +123,28 @@ jobs:
     # 步骤 6: 生成变量
     - name: Generate Variables
       run: |
-        cp "$CONFIG_FILE" "$OPENWRT_PATH/.config"
-        
         cd "$OPENWRT_PATH"
-        make defconfig > /dev/null 2>&1
-        
+
+        # BE12 Pro 当前由上游源码默认配置生成；如需使用仓库内配置文件，
+        # 请先恢复 CONFIG_FILE 环境变量并提交对应配置文件。
+        if [ -n "${CONFIG_FILE:-}" ]; then
+          [ -f "$GITHUB_WORKSPACE/$CONFIG_FILE" ] || {
+            echo "ERROR: CONFIG_FILE 指定的文件不存在: $CONFIG_FILE"
+            exit 1
+          }
+          cp "$GITHUB_WORKSPACE/$CONFIG_FILE" .config
+          make defconfig > /dev/null 2>&1
+        fi
+
         SOURCE_REPO="$(basename "$REPO_URL" .git)"
         echo "SOURCE_REPO=$SOURCE_REPO" >> "$GITHUB_ENV"
-        
-        DEVICE_TARGET=$(grep -m1 'CONFIG_TARGET_BOARD' .config | cut -d'"' -f2)
-        echo "DEVICE_TARGET=$DEVICE_TARGET" >> "$GITHUB_ENV"
-        
-        DEVICE_SUBTARGET=$(grep -m1 'CONFIG_TARGET_SUBTARGET' .config | cut -d'"' -f2)
-        echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> "$GITHUB_ENV"
+
+        if [ -f .config ]; then
+          DEVICE_TARGET=$(grep -m1 'CONFIG_TARGET_BOARD' .config | cut -d'"' -f2 || true)
+          DEVICE_SUBTARGET=$(grep -m1 'CONFIG_TARGET_SUBTARGET' .config | cut -d'"' -f2 || true)
+          echo "DEVICE_TARGET=$DEVICE_TARGET" >> "$GITHUB_ENV"
+          echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> "$GITHUB_ENV"
+        fi
 
     # 步骤 6.1: 生成缓存 Key（基于配置）
     - name: Generate Cache Key
@@ -191,7 +199,9 @@ jobs:
     - name: Load Custom Configuration
       run: |
         [ -e files ] && mv files "$OPENWRT_PATH/files"
-        [ -e "$CONFIG_FILE" ] && mv "$CONFIG_FILE" "$OPENWRT_PATH/.config"
+        if [ -n "${CONFIG_FILE:-}" ] && [ -e "$CONFIG_FILE" ]; then
+          mv "$CONFIG_FILE" "$OPENWRT_PATH/.config"
+        fi
         
         [ -d "$GITHUB_WORKSPACE/scripts" ] && chmod +x "$GITHUB_WORKSPACE/scripts"/*.sh
         chmod +x "$DIY_P2_SH"
@@ -202,10 +212,7 @@ jobs:
     # 步骤 11: SSH 调试（可选）
     - name: SSH Debug
       uses: mxschmitt/action-tmate@v3
-      if: |
-        failure() || 
-        (github.event_name == 'workflow_dispatch' && 
-         github.event.inputs.enable_ssh_debug == 'true')
+      if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.enable_ssh_debug == 'true' }}
       with:
         limit-output-lines: 1000
 
