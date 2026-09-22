@@ -11,6 +11,9 @@ on:
         options:
           - 'false'
           - 'true'
+  repository_dispatch:
+    types:
+      - source-code-update
 
 env:
   REPO_URL: https://github.com/dailook/immortalwrt-24.10.git
@@ -19,9 +22,7 @@ env:
   DIY_P1_SH: OpenWrt-part1.sh
   DIY_P2_SH: OpenWrt-part2.sh
   CACHE_TOOLCHAIN: true
-  UPLOAD_BIN_DIR: false
   FIRMWARE_RELEASE: true
-  FIRMWARE_TAG: ikuai_q6000_immortalwrt_2410
   TZ: Asia/Shanghai
 
 jobs:
@@ -30,7 +31,6 @@ jobs:
     # 添加权限声明
     permissions:
       contents: write
-      packages: write
     
     steps:
     # 步骤 1: 检查服务器性能
@@ -85,7 +85,7 @@ jobs:
 
     # 步骤 3: 扩展磁盘空间
     - name: Combine Disks
-      uses: easimon/maximize-build-space@master
+      uses: easimon/maximize-build-space@v10
       with:
         swap-size-mb: 1024
         temp-reserve-mb: 100
@@ -102,7 +102,7 @@ jobs:
         df -hT "$GITHUB_WORKSPACE"
         
         echo "克隆源码仓库..."
-        git clone "$REPO_URL" -b "$REPO_BRANCH" openwrt
+        git clone --depth=1 --single-branch --branch "$REPO_BRANCH" "$REPO_URL" openwrt
         
         cd openwrt
         echo "OPENWRT_PATH=$PWD" >> "$GITHUB_ENV"
@@ -117,8 +117,10 @@ jobs:
         COMMIT_MESSAGE=$(git show -s --date=short --format="内容: %s")
         echo "COMMIT_MESSAGE=$COMMIT_MESSAGE" >> "$GITHUB_ENV"
         
-        COMMIT_HASH=$(git show -s --date=short --format="hash: %H")
-        echo "COMMIT_HASH=$COMMIT_HASH" >> "$GITHUB_ENV"
+        COMMIT_HASH=$(git rev-parse HEAD)
+        SOURCE_SHORT_HASH=$(git rev-parse --short=7 HEAD)
+        echo "COMMIT_HASH=hash: $COMMIT_HASH" >> "$GITHUB_ENV"
+        echo "SOURCE_SHORT_HASH=$SOURCE_SHORT_HASH" >> "$GITHUB_ENV"
 
     # 步骤 6: 生成变量
     - name: Generate Variables
@@ -137,14 +139,18 @@ jobs:
         DEVICE_SUBTARGET=$(grep -m1 'CONFIG_TARGET_SUBTARGET' .config | cut -d'"' -f2)
         echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> "$GITHUB_ENV"
 
-    # 步骤 7: 缓存编译工具链
-    - name: Cache Toolchain
+        CONFIG_HASH=$(sha256sum "$GITHUB_WORKSPACE/$CONFIG_FILE" | cut -d' ' -f1)
+        echo "CONFIG_HASH=$CONFIG_HASH" >> "$GITHUB_ENV"
+
+    # 步骤 7: 缓存下载目录
+    - name: Cache Downloads
       if: env.CACHE_TOOLCHAIN == 'true'
-      uses: HiGarfield/cachewrtbuild@main
+      uses: actions/cache@v4
       with:
-        ccache: false
-        mixkey: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
-        prefix: ${{ env.OPENWRT_PATH }}
+        path: ${{ env.OPENWRT_PATH }}/dl
+        key: dl-${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.CONFIG_HASH }}
+        restore-keys: |
+          dl-${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-
 
     # 步骤 8: 加载自定义 feeds
     - name: Load Custom Feeds
@@ -175,10 +181,7 @@ jobs:
     # 步骤 11: SSH 调试（可选）
     - name: SSH Debug
       uses: mxschmitt/action-tmate@v3
-      if: |
-        failure() || 
-        (github.event_name == 'workflow_dispatch' && 
-         github.event.inputs.enable_ssh_debug == 'true')
+      if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.enable_ssh_debug == 'true' }}
       with:
         limit-output-lines: 1000
 
@@ -203,7 +206,7 @@ jobs:
         echo "使用 $(nproc) 线程编译"
         
         # 多次尝试编译，逐步降低并行度
-        make -j$(nproc) || make -j$(( $(nproc) / 2 )) || make -j1 || make -j1 V=s
+        make -j"$(nproc)" || make -j1 V=s
         
         # 标记编译成功
         echo "status=success" >> "$GITHUB_OUTPUT"
@@ -211,6 +214,7 @@ jobs:
         # 记录时间
         echo "DATE=$(date +'%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
         echo "FILE_DATE=$(date +'%Y.%m.%d')" >> "$GITHUB_ENV"
+        echo "RELEASE_TAG=ikuai-q6000-24.10-$(date +'%Y%m%d')-${SOURCE_SHORT_HASH}" >> "$GITHUB_ENV"
 
     # 步骤 14: 检查空间使用
     - name: Check Space Usage
@@ -223,7 +227,9 @@ jobs:
     - name: Organize Files
       if: steps.compile.outputs.status == 'success'
       run: |
-        cd "$OPENWRT_PATH/bin/targets/*/*" || exit 1
+        TARGET_DIR="$OPENWRT_PATH/bin/targets/$DEVICE_TARGET/$DEVICE_SUBTARGET"
+        [ -d "$TARGET_DIR" ] || { echo "ERROR: 固件输出目录不存在: $TARGET_DIR"; exit 1; }
+        cd "$TARGET_DIR"
         
         echo "SHA256 校验和："
         cat sha256sums
@@ -245,9 +251,12 @@ jobs:
         rm -f feeds.buildinfo version.buildinfo 2>/dev/null || true
         
         # 提取内核版本
-        if [ -f "*.manifest" ]; then
-          KERNEL=$(grep '^kernel' *.manifest 2>/dev/null | head -1 | cut -d- -f2 | xargs || echo "unknown")
-          echo "KERNEL=$KERNEL" >> "$GITHUB_ENV"
+        MANIFEST=$(find . -maxdepth 1 -type f -name '*.manifest' -print -quit)
+        if [ -n "$MANIFEST" ]; then
+          KERNEL=$(grep '^kernel' "$MANIFEST" 2>/dev/null | head -1 | cut -d- -f2 | xargs)
+          echo "KERNEL=${KERNEL:-unknown}" >> "$GITHUB_ENV"
+        else
+          echo "KERNEL=unknown" >> "$GITHUB_ENV"
         fi
         
         echo "FIRMWARE_PATH=$PWD" >> "$GITHUB_ENV"
@@ -266,15 +275,15 @@ jobs:
       if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE == 'true'
       uses: ncipollo/release-action@v1
       with:
-        name: R${{ env.DATE }} for ${{ env.FIRMWARE_TAG }}
+        name: iKuai Q6000 ImmortalWrt ${{ env.FILE_DATE }} (${{ env.SOURCE_SHORT_HASH }})
         allowUpdates: true
         makeLatest: true
-        tag: ${{ env.FIRMWARE_TAG }}
+        tag: ${{ env.RELEASE_TAG }}
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: ${{ env.FIRMWARE_PATH }}/*
         body: |
           # ImmortalWrt 固件发布
-          **设备**: ${{ env.FIRMWARE_TAG }}
+          **设备**: iKuai Q6000 (SPI-NAND)
           **编译时间**: ${{ env.DATE }}
           
           ## 📒 固件信息

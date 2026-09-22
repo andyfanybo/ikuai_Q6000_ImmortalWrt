@@ -1,19 +1,14 @@
-#!/bin/bash
+#!/bin/sh
 
-echo "Applying custom defaults..."
+# Keep ImmortalWrt/OpenWrt security defaults intact.
+# Device-specific defaults that are safe for every deployment may be added here.
+# Do not globally expose router services on WAN or disable DNS rebind protection.
 
-# 自动查找 wan zone
-WAN_IDX=$(uci show firewall | grep "@zone" | grep "name='wan'" | cut -d[ -f2 | cut -d] -f1)
+echo "Applying Q6000 custom defaults..."
 
-if [ -n "$WAN_IDX" ]; then
-    uci set firewall.@zone[$WAN_IDX].input='ACCEPT'
-    uci set firewall.@zone[$WAN_IDX].forward='ACCEPT'
-    uci commit firewall
-fi
+# Example:
+# uci -q set system.@system[0].zonename='Asia/Shanghai'
+# uci -q commit system
 
-# 关闭 DNS 重绑定保护
-uci -q set dhcp.@dnsmasq[0].rebind_protection='0'
-uci -q commit dhcp
-
-echo "Custom defaults applied."
+echo "Q6000 custom defaults applied."
 exit 0
