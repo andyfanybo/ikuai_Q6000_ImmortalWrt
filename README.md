@@ -36,7 +36,6 @@
 
 - `immortalwrt-ikuai_Q6000.yaml`：Q6000 固件构建与 Release 发布。
 - `update-checker.yml`：每天检查 `dailook/immortalwrt-24.10` 的 `openwrt-24.10` 分支；发现新的上游 commit 后触发一次 Q6000 构建。
-- `immortalwrt-BE12_Pro.yaml`：仓库内保留的 BE12 Pro 实验性工作流，与 Q6000 固件无关。
 
 Q6000 workflow 同时支持在 Actions 页面手动运行。SSH/tmate 调试仅在手动运行并明确选择 `enable_ssh_debug=true` 时启用，普通构建失败不会自动开放远程调试会话。
 
@@ -130,7 +129,6 @@ Q6000 workflow 的主要步骤：
 .
 ├── .github/workflows/
 │   ├── immortalwrt-ikuai_Q6000.yaml
-│   ├── immortalwrt-BE12_Pro.yaml
 │   └── update-checker.yml
 ├── scripts/
 │   └── init-settings.sh
